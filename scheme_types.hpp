@@ -1,7 +1,6 @@
 #pragma once
 #include <string>
 #include <memory>
-#include <vector>
 #include <variant>
 #include <stdexcept>
 #include <type_traits>
@@ -14,9 +13,12 @@ struct Pair;
 struct Frame;
 struct Value;
 struct Procedure;
+struct BuiltinProcedure;
+struct LambdaProcedure;
+struct MuProcedure;
 
 using PairPtr = std::shared_ptr<Pair>;
-using FramePtr = std::shared_ptr<Frame>;
+using FramePtr = std::weak_ptr<Frame>;
 using ProcedurePtr = std::shared_ptr<Procedure>;
 
 struct NilType : public std::monostate {};
@@ -39,44 +41,43 @@ struct Value : public std::variant<
         requires std::is_arithmetic_v<T> && (!std::is_same_v<T, bool>)
     inline Value(T v) : variant(static_cast<double>(v)) {}
     inline Value(const Pair &v);
-    template <typename T> inline bool isInstance() const {
+    template <typename T> inline bool isType() const {
         return std::holds_alternative<T>(*this);
     }
-    template <typename T> inline T asType() const {
+    template <typename T> inline T toType() const {
         return std::get<T>(*this);
     }
     inline bool isNil() const {
-        return isInstance<NilType>();
+        return isType<NilType>();
     };
     inline bool isFalse() const {
-        return isInstance<bool>() && asType<bool>() == false;
+        return isType<bool>() && toType<bool>() == false;
     }
     inline bool isTrue() const {
         return !isFalse();
     }
     inline bool isPair() const {
-        return isInstance<PairPtr>();
+        return isType<PairPtr>();
     }
     inline bool isList() const;
     inline bool isProcedure() const {
-        return isInstance<ProcedurePtr>();
+        return isType<ProcedurePtr>();
     }
     inline bool isBoolean() const {
-        return isInstance<bool>();
+        return isType<bool>();
     }
     inline bool isNumber() const {
-        return isInstance<double>();
+        return isType<double>();
     }
     inline bool isString() const {
-        if (!isInstance<std::string>()) {
+        if (!isType<std::string>()) {
             return false;
         }
-        const std::string &str = asType<std::string>();
+        const std::string &str = toType<std::string>();
         return str.starts_with('"') && str.ends_with('"');
     }
     inline bool isSymbol() const {
-        return isInstance<std::string>() &&
-               !asType<std::string>().starts_with('"');
+        return isType<std::string>() && !toType<std::string>().starts_with('"');
     }
     inline bool isAtomic() const {
         return isBoolean() || isNumber() || isSymbol() || isNil() || isString();
@@ -117,8 +118,17 @@ struct Value : public std::variant<
                 fmt::format("{} is not callable: {}", typeName(), repr()));
         }
     }
+    //
+    inline size_t size() const;
 };
 
+struct Procedure {
+    virtual std::string str() = 0;
+    virtual std::string repr() = 0;
+    virtual ~Procedure() = 0;
+};
+
+// Notes: 如果在namespace内include会导致嵌套namespace
 struct Pair {
     Value car, cdr;
     Pair() = default;
@@ -130,75 +140,6 @@ struct Pair {
     inline std::string repr() const {
         return fmt::format("pair({}, {})", car.repr(), cdr.repr());
     }
-};
-// Notes: 后置实现,解决循环引用的问题
-inline Value::Value(const Pair &p) : variant(std::make_shared<Pair>(p)) {}
-inline bool Value::isList() const {
-    Value x = *this;
-    while (!x.isNil()) {
-        if (!x.isPair()) {
-            return false;
-        }
-        x = x.asType<PairPtr>()->cdr;
-    }
-    return true;
-}
-inline std::string Value::str() const {
-    if (isNil()) {
-        return "()";
-    }
-    if (isList()) {
-        return asType<PairPtr>()->str();
-    }
-    if (isString()) {
-        return fmt::format("\"{}\"", asType<std::string>());
-    }
-    if (isSymbol()) {
-        return asType<std::string>();
-    }
-    if (isNumber()) {
-        return std::to_string(asType<double>());
-    }
-    if (isBoolean()) {
-        return asType<bool>() ? "#t" : "#f";
-    }
-    if (isProcedure()) {
-        return "#<procedure>";
-    }
-    throw std::runtime_error("unknown type");
-    return "undefined";
-}
-inline std::string Value::repr() const {
-    if (isNil()) {
-        return "nil";
-    }
-    if (isList()) {
-        return asType<PairPtr>()->repr();
-    }
-    if (isSymbol() || isString()) {
-        return asType<std::string>();
-    }
-    if (isNumber()) {
-        return std::to_string(asType<double>());
-    }
-    if (isBoolean()) {
-        return asType<bool>() ? "#t" : "#f";
-    }
-    if (isProcedure()) {
-        return "#<procedure>";
-    }
-    throw std::runtime_error("unknown type");
-    return "undefined";
-}
-
-struct Frame {
-    FramePtr parent;
-    std::unordered_map<std::string, Value> bindings;
-};
-
-struct Procedure {
-    virtual Value apply(const std::vector<Value> &args) = 0;
-    virtual ~Procedure() = 0;
 };
 
 } // namespace Scheme
@@ -212,7 +153,6 @@ template <> struct fmt::formatter<Scheme::Pair> {
         return fmt::format_to(ctx.out(), "{}", val.str());
     }
 };
-
 template <> struct fmt::formatter<Scheme::Value> {
     constexpr auto parse(format_parse_context &ctx) {
         return ctx.end();
@@ -222,3 +162,120 @@ template <> struct fmt::formatter<Scheme::Value> {
         return fmt::format_to(ctx.out(), "{}", val.str());
     }
 };
+
+#include "scheme_procedures.hpp"
+namespace Scheme {
+// Notes: 后置实现,解决循环引用的问题
+inline Value::Value(const Pair &p) : variant(std::make_shared<Pair>(p)) {}
+inline bool Value::isList() const {
+    Value x = *this;
+    while (!x.isNil()) {
+        if (!x.isPair()) {
+            return false;
+        }
+        x = x.toType<PairPtr>()->cdr;
+    }
+    return true;
+}
+inline std::string Value::str() const {
+    if (isNil()) {
+        return "()";
+    }
+    if (isList()) {
+        return toType<PairPtr>()->str();
+    }
+    if (isSymbol() || isString()) {
+        return toType<std::string>();
+    }
+    if (isNumber()) {
+        return std::to_string(toType<double>());
+    }
+    if (isBoolean()) {
+        return toType<bool>() ? "#t" : "#f";
+    }
+    if (isProcedure()) {
+        return "#<procedure>";
+    }
+    throw std::runtime_error("unknown type");
+    return "undefined";
+}
+inline std::string Value::repr() const {
+    if (isNil()) {
+        return "nil";
+    }
+    if (isList()) {
+        return toType<PairPtr>()->repr();
+    }
+    if (isSymbol() || isString()) {
+        return toType<std::string>();
+    }
+    if (isNumber()) {
+        return std::to_string(toType<double>());
+    }
+    if (isBoolean()) {
+        return toType<bool>() ? "#t" : "#f";
+    }
+    if (isProcedure()) {
+        return "#<procedure>";
+    }
+    throw std::runtime_error("unknown type");
+    return "undefined";
+}
+
+inline size_t Value::size() const {
+    size_t len = 0;
+    Value v = *this;
+    while (!v.isNil()) {
+        ++len;
+        if (v.isType<PairPtr>()) {
+            v = v.toType<PairPtr>()->cdr;
+        } else {
+            break;
+        }
+    }
+    return len;
+}
+
+struct Frame : public std::enable_shared_from_this<Frame> {
+    // Notes: 为什么使用weak_ptr
+    FramePtr parent;
+    std::unordered_map<std::string, Value> bindings;
+    inline Frame(FramePtr parent_) : parent(parent_) {}
+    inline void define(const std::string &symbol, Value v) {
+        bindings[symbol] = v;
+    }
+    inline Value lookUp(Value var) {
+        return lookUp(var.toType<std::string>());
+    }
+    inline Value lookUp(const std::string &name) {
+        if (bindings.contains(name)) {
+            return bindings[name];
+        }
+        if (auto p = parent.lock()) {
+            return p->lookUp(name);
+        }
+        throw std::runtime_error("undefined variable: " + name);
+    }
+    std::shared_ptr<Frame> makeChildFrame(Value formals, Value vals) {
+        if (formals.size() != vals.size()) {
+            throw std::runtime_error(
+                "incorrect number of arguments to function call");
+        }
+        /* Notes: 如果标记为const则报错
+        error: no matching function for call to ‘construct_at(Scheme::Frame*&,
+        std::weak_ptr<const Scheme::Frame>)’ 115 | std::construct_at(__p,
+        std::forward<_Args>(__args)...);
+        */
+        auto child = std::make_shared<Frame>(weak_from_this());
+        while (!formals.isNil() && !vals.isNil()) {
+            auto pv = vals.toType<PairPtr>();
+            auto pf = formals.toType<PairPtr>();
+            child->bindings[pf->car.toType<std::string>()] = pv->car;
+            vals = pv->cdr;
+            formals = pf->cdr;
+        }
+        return child;
+    }
+};
+
+} // namespace Scheme
