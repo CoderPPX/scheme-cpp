@@ -1,11 +1,15 @@
 #pragma once
 #include <string>
 #include <memory>
+#include <vector>
 #include <variant>
 #include <stdexcept>
-#include <type_traits>
 #include <unordered_map>
 #include <fmt/format.h>
+
+#define SCHEME_THROW(msg)                                                      \
+    throw std::runtime_error(                                                  \
+        fmt::format("Error: in function {}: {}", __PRETTY_FUNCTION__, (msg)));
 
 namespace Scheme {
 
@@ -37,9 +41,15 @@ struct Value : public std::variant<
     using variant::variant;
     // Notes: 为什么这样设计
     // 可能的问题: Python变量存的是引用还是值,C++呢
-    template <typename T>
-        requires std::is_arithmetic_v<T> && (!std::is_same_v<T, bool>)
-    inline Value(T v) : variant(static_cast<double>(v)) {}
+    /*
+    Notes: Value(1.22)
+    error: conversion from ‘double’ to ‘Scheme::Value’ is ambiguous
+    8 |     global->define("c", 1.0);
+    */
+    // Notes: 这个constructor会导致ambiguity
+    // template <typename T>
+    //     requires std::is_arithmetic_v<T> && (!std::is_same_v<T, bool>)
+    // inline Value(T v) : variant(static_cast<double>(v)) {}
     inline Value(const Pair &v);
     template <typename T> inline bool isType() const {
         return std::holds_alternative<T>(*this);
@@ -82,6 +92,8 @@ struct Value : public std::variant<
     inline bool isAtomic() const {
         return isBoolean() || isNumber() || isSymbol() || isNil() || isString();
     };
+    inline PairPtr toPair() const;
+    inline std::vector<Value> toList() const;
     // May be wrong
     inline bool isSelfEvaluating() const {
         return (isAtomic() && !isSymbol()); // or expr is None
@@ -106,7 +118,7 @@ struct Value : public std::variant<
         if (isProcedure()) {
             return "procedure";
         }
-        throw std::runtime_error("unknown type");
+        SCHEME_THROW("unknown type");
         return "undefined";
     }
     inline std::string str() const;
@@ -114,7 +126,7 @@ struct Value : public std::variant<
     //
     inline void validateProcedure() {
         if (!isProcedure()) {
-            throw std::runtime_error(
+            SCHEME_THROW(
                 fmt::format("{} is not callable: {}", typeName(), repr()));
         }
     }
@@ -131,7 +143,7 @@ struct Procedure {
 // Notes: 如果在namespace内include会导致嵌套namespace
 struct Pair {
     Value car, cdr;
-    Pair() = default;
+    inline Pair() = default;
     inline Pair(Value a, Value b) : car(std::move(a)), cdr(std::move(b)) {}
     inline std::string str() const {
         return cdr.isNil() ? fmt::format("({})", car.str())
@@ -163,10 +175,24 @@ template <> struct fmt::formatter<Scheme::Value> {
     }
 };
 
-#include "scheme_procedures.hpp"
 namespace Scheme {
+
 // Notes: 后置实现,解决循环引用的问题
 inline Value::Value(const Pair &p) : variant(std::make_shared<Pair>(p)) {}
+
+inline PairPtr Value::toPair() const {
+    return toType<PairPtr>();
+}
+inline std::vector<Value> Value::toList() const {
+    std::vector<Value> values;
+    Value v = *this;
+    while (!v.isNil() && v.isPair()) {
+        values.emplace_back(v.toType<PairPtr>()->car);
+        v = v.toType<PairPtr>()->cdr;
+    }
+    return values;
+}
+
 inline bool Value::isList() const {
     Value x = *this;
     while (!x.isNil()) {
@@ -177,6 +203,7 @@ inline bool Value::isList() const {
     }
     return true;
 }
+
 inline std::string Value::str() const {
     if (isNil()) {
         return "()";
@@ -196,9 +223,10 @@ inline std::string Value::str() const {
     if (isProcedure()) {
         return "#<procedure>";
     }
-    throw std::runtime_error("unknown type");
+    SCHEME_THROW("unknown type");
     return "undefined";
 }
+
 inline std::string Value::repr() const {
     if (isNil()) {
         return "nil";
@@ -218,7 +246,7 @@ inline std::string Value::repr() const {
     if (isProcedure()) {
         return "#<procedure>";
     }
-    throw std::runtime_error("unknown type");
+    SCHEME_THROW("unknown type");
     return "undefined";
 }
 
@@ -240,6 +268,7 @@ struct Frame : public std::enable_shared_from_this<Frame> {
     // Notes: 为什么使用weak_ptr
     FramePtr parent;
     std::unordered_map<std::string, Value> bindings;
+    inline Frame() = default;
     inline Frame(FramePtr parent_) : parent(parent_) {}
     inline void define(const std::string &symbol, Value v) {
         bindings[symbol] = v;
@@ -254,12 +283,11 @@ struct Frame : public std::enable_shared_from_this<Frame> {
         if (auto p = parent.lock()) {
             return p->lookUp(name);
         }
-        throw std::runtime_error("undefined variable: " + name);
+        SCHEME_THROW("undefined variable: " + name);
     }
     std::shared_ptr<Frame> makeChildFrame(Value formals, Value vals) {
         if (formals.size() != vals.size()) {
-            throw std::runtime_error(
-                "incorrect number of arguments to function call");
+            SCHEME_THROW("incorrect number of arguments to function call");
         }
         /* Notes: 如果标记为const则报错
         error: no matching function for call to ‘construct_at(Scheme::Frame*&,
