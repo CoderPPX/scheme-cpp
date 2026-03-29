@@ -1,0 +1,46 @@
+---
+# 基础样式参考 LLVM
+BasedOnStyle: LLVM
+
+# 缩进宽度为 4
+IndentWidth: 4
+
+# 使用制表符 Tab，且 Tab 宽度为 4
+UseTab: Always
+TabWidth: 4
+
+# 访问修饰符（public/private）的偏移量
+# 设为 -4 意味着相对于 class 内部缩进向左偏移 4 个单位，从而顶格对齐
+AccessModifierOffset: -4
+
+# 花括号换行设置：所有控制语句（if/while/for/switch）的花括号保持在同一行
+BreakBeforeBraces: Custom
+BraceWrapping:
+    AfterClass: false
+    AfterControlStatement: Never
+    AfterEnum: false
+    AfterFunction: false
+    AfterNamespace: false
+    AfterObjCDeclaration: false
+    AfterStruct: false
+    AfterUnion: false
+    AfterExternBlock: false
+    BeforeCatch: false
+    BeforeElse: false
+    IndentBraces: false
+    SplitEmptyFunction: true
+    SplitEmptyRecord: true
+    SplitEmptyNamespace: true
+
+# 指针对齐（根据个人偏好，通常靠左 int* p 或靠右 int *p）
+PointerAlignment: Right
+
+# 允许短的语句保持在同一行（例如 if (a) return;）
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: Never
+
+# 限制行宽（默认 80 较窄，建议 100 或 120）
+ColumnLimit: 100
+
+# 整理 include 排序
+SortIncludes: Never
