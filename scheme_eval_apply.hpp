@@ -19,10 +19,11 @@ inline Value eval(Value expr, FramePtr env_, bool tail) {
 			SCHEME_THROW(fmt::format("malformed list: {}", expr.str()));
 			return expr;
 		}
-		auto p = expr.toType<PairPtr>();
+		auto p = expr.toPair();
 		auto car = p->car, cdr = p->cdr;
 		if (car.isSymbol() && SPECIAL_FORMS.contains(car.toType<std::string>())) // special forms
 		{
+			// List(List("f", "x"), List("+", "x", 1)) -> ((f x) (+ x 1))
 			return SPECIAL_FORMS[car.toType<std::string>()](cdr.toList(), env_);
 		} else {
 			auto procedure = eval(car, env_);
@@ -36,15 +37,14 @@ inline Value eval(Value expr, FramePtr env_, bool tail) {
 	SCHEME_THROW("frame already released");
 }
 
-inline Value evalAll(Value expr_, FramePtr env_) {
-	if (expr_.isNil()) {
+inline Value evalAll(const ValueList &expr, FramePtr env_) {
+	if (expr.empty()) {
 		return nil;
 	}
-	while (!expr_.toType<PairPtr>()->cdr.isNil()) {
-		eval(expr_.toType<PairPtr>()->car, env_);
-		expr_ = expr_.toType<PairPtr>()->cdr;
+	for (size_t i = 0; i < expr.size() - 1; ++i) {
+		eval(expr[i], env_);
 	}
-	return eval(expr_.toType<PairPtr>()->car, env_);
+	return eval(expr.back(), env_);
 }
 
 inline Value apply(ProcedurePtr procedure, const ValueList &args_, FramePtr env_) {
@@ -52,7 +52,11 @@ inline Value apply(ProcedurePtr procedure, const ValueList &args_, FramePtr env_
 		if (auto builtin = std::dynamic_pointer_cast<BuiltinProcedure>(procedure)) {
 			return builtin->cppFunc(args_, env);
 		} else if (auto lambda = std::dynamic_pointer_cast<LambdaProcedure>(procedure)) {
-			return evalAll(lambda->body, env->makeChildFrame(lambda->formals.toList(), args_));
+			/*
+			fmt::print("{}\n", eval(List(List("lambda", List("x", "y"),
+				List("+", "x", "y")), 1, 2), global)); 输出2
+			*/
+			return evalAll(lambda->body, env->makeChildFrame(lambda->formals, args_));
 		}
 		// else if (auto mu = std::dynamic_pointer_cast<MuProcedure>(procedure))
 		// {}

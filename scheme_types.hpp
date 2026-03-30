@@ -4,11 +4,32 @@
 #include <vector>
 #include <variant>
 #include <stdexcept>
+#include <type_traits>
 #include <unordered_map>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
+#ifndef SCHEME_ENABLE_STACKTRACE
+#define SCHEME_ENABLE_STACKTRACE
+#endif
+
+#ifdef SCHEME_ENABLE_STACKTRACE
+#include <boost/stacktrace.hpp>
 #define SCHEME_THROW(msg)                                                                          \
-	throw std::runtime_error(fmt::format("Error: in function {}: {}", __PRETTY_FUNCTION__, (msg)));
+	do {                                                                                           \
+		auto st = boost::stacktrace::stacktrace();                                                 \
+		std::string trace = "Traceback (most recent call last):\n";                                \
+		for (std::size_t i = 0; i < st.size(); ++i) {                                              \
+			trace += fmt::format("\t#{} {}\n", i, st[i].name());                                   \
+		}                                                                                          \
+		trace += fmt::format("Error: {}", msg);                                                    \
+		throw std::runtime_error(trace);                                                           \
+	} while (0);
+#else
+#define SCHEME_THROW(msg)                                                                          \
+	throw std::runtime_error(                                                                      \
+		fmt::format("Error: in function \"{}\": {}", __PRETTY_FUNCTION__, (msg)));
+#endif
 
 namespace Scheme {
 
@@ -38,16 +59,17 @@ struct Value : public std::variant<double,		 // Number
 	// Notes: 这一句什么意思
 	using variant::variant;
 	// Notes: 为什么这样设计
-	// 可能的问题: Python变量存的是引用还是值,C++呢
+	// 可能的问题: Python 变量存的是引用还是值 C++ 呢
 	/*
 	Notes: Value(1.22)
 	error: conversion from ‘double’ to ‘Scheme::Value’ is ambiguous
 	8 |     global->define("c", 1.0);
 	*/
 	// Notes: 这个constructor会导致ambiguity
-	// template <typename T>
-	//     requires std::is_arithmetic_v<T> && (!std::is_same_v<T, bool>)
-	// inline Value(T v) : variant(static_cast<double>(v)) {}
+	template <typename T>
+		requires std::is_integral_v<T> && (!std::is_same_v<T, bool>)
+	inline Value(T v) : variant(static_cast<double>(v)) {}
+	inline Value(float v) : variant(static_cast<double>(v)) {}
 	inline Value(const Pair &v);
 	template <typename T> inline bool isType() const { return std::holds_alternative<T>(*this); }
 	template <typename T> inline T toType() const { return std::get<T>(*this); }
@@ -88,7 +110,7 @@ struct Value : public std::variant<double,		 // Number
 		if (isNil()) {
 			return "nil";
 		}
-		if (isList()) {
+		if (isList() || isPair()) {
 			return "pair";
 		}
 		if (isSymbol()) {
@@ -131,12 +153,38 @@ struct Pair {
 	Value car, cdr;
 	inline Pair() = default;
 	inline Pair(Value a, Value b) : car(std::move(a)), cdr(std::move(b)) {}
+	// Notes: Pair如何转换为string
+	// 非规范列表是什么
 	inline std::string str() const {
-		return cdr.isNil() ? fmt::format("({})", car.str())
-						   : fmt::format("({} {})", car.str(), cdr.str());
+		/* test cases:
+		Pair(1, nil) -> (1)
+		Pair(1, 2) -> (1 . 2)
+		Pair(1, Pair(2, nil)) -> (1 2)
+		Pair(Pair(1, nil), nil) -> ((1))
+		Pair(Pair(1, Pair(2, nil)), Pair(1, nil)) -> ((1 2) 1)
+		Pair(nil, nil) -> (())
+		Pair(1, Pair(1, 2)) -> (1 (1 . 2))
+		Pair(1, Pair(2, Pair(3, 4))) -> (1 2 3 . 4)
+		*/
+		Value rest = cdr;
+		std::string s = '(' + car.str();
+		while (rest.isPair()) {
+			s += (' ' + rest.toPair()->car.str());
+			rest = rest.toPair()->cdr;
+		}
+		if (!rest.isNil()) {
+			s += " . " + rest.str();
+		}
+		return s + ')';
 	}
 	inline std::string repr() const { return fmt::format("pair({}, {})", car.repr(), cdr.repr()); }
 };
+
+// Notes: auxiliary class
+inline Value List() { return nil; }
+template <typename T1, typename... Ts> inline Value List(T1 v1, Ts... vs) {
+	return Pair(v1, List(vs...));
+}
 
 } // namespace Scheme
 
@@ -165,8 +213,8 @@ inline ValueList Value::toList() const {
 	ValueList values;
 	Value v = *this;
 	while (!v.isNil() && v.isPair()) {
-		values.emplace_back(v.toType<PairPtr>()->car);
-		v = v.toType<PairPtr>()->cdr;
+		values.emplace_back(v.toPair()->car);
+		v = v.toPair()->cdr;
 	}
 	return values;
 }
@@ -174,8 +222,8 @@ template <typename Functor> inline ValueList Value::mapToList(Functor func) cons
 	ValueList values;
 	Value v = *this;
 	while (!v.isNil() && v.isPair()) {
-		values.emplace_back(func(v.toType<PairPtr>()->car));
-		v = v.toType<PairPtr>()->cdr;
+		values.emplace_back(func(v.toPair()->car));
+		v = v.toPair()->cdr;
 	}
 	return values;
 }
@@ -186,7 +234,7 @@ inline bool Value::isList() const {
 		if (!x.isPair()) {
 			return false;
 		}
-		x = x.toType<PairPtr>()->cdr;
+		x = x.toPair()->cdr;
 	}
 	return true;
 }
@@ -195,8 +243,8 @@ inline std::string Value::str() const {
 	if (isNil()) {
 		return "()";
 	}
-	if (isList()) {
-		return toType<PairPtr>()->str();
+	if (isList() || isPair()) {
+		return toPair()->str();
 	}
 	if (isSymbol() || isString()) {
 		return toType<std::string>();
@@ -208,7 +256,7 @@ inline std::string Value::str() const {
 		return toType<bool>() ? "#t" : "#f";
 	}
 	if (isProcedure()) {
-		return "#<procedure>";
+		return toType<ProcedurePtr>()->str();
 	}
 	SCHEME_THROW("unknown type");
 	return "undefined";
@@ -218,8 +266,8 @@ inline std::string Value::repr() const {
 	if (isNil()) {
 		return "nil";
 	}
-	if (isList()) {
-		return toType<PairPtr>()->repr();
+	if (isList() || isPair()) {
+		return toPair()->repr();
 	}
 	if (isSymbol() || isString()) {
 		return toType<std::string>();
@@ -231,7 +279,7 @@ inline std::string Value::repr() const {
 		return toType<bool>() ? "#t" : "#f";
 	}
 	if (isProcedure()) {
-		return "#<procedure>";
+		return toType<ProcedurePtr>()->repr();
 	}
 	SCHEME_THROW("unknown type");
 	return "undefined";
@@ -242,8 +290,8 @@ inline size_t Value::size() const {
 	Value v = *this;
 	while (!v.isNil()) {
 		++len;
-		if (v.isType<PairPtr>()) {
-			v = v.toType<PairPtr>()->cdr;
+		if (v.isPair()) {
+			v = v.toPair()->cdr;
 		} else {
 			break;
 		}
@@ -280,8 +328,8 @@ struct Frame : public std::enable_shared_from_this<Frame> {
 		*/
 		auto child = std::make_shared<Frame>(weak_from_this());
 		// while (!formals.isNil() && !vals.isNil()) {
-		// 	auto pv = vals.toType<PairPtr>();
-		// 	auto pf = formals.toType<PairPtr>();
+		// 	auto pv = vals.toPair();
+		// 	auto pf = formals.toPair();
 		// 	child->bindings[pf->car.toType<std::string>()] = pv->car;
 		// 	vals = pv->cdr;
 		// 	formals = pf->cdr;
