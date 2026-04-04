@@ -7,6 +7,7 @@ namespace Scheme {
 using FuncType = std::function<Value(const ValueList &args, FramePtr env)>;
 
 inline Value eval(Value expr, FramePtr env_, bool tail = false);
+inline Value evalAll(const ValueList &expr, FramePtr env_);
 
 struct BuiltinProcedure : public Procedure {
 public:
@@ -297,22 +298,55 @@ inline Value do_cond_form(const ValueList &args, FramePtr env_) {
 				SCHEME_THROW("badly formed cond expression");
 			}
 			auto expr_list = expr.toList();
-			if (expr_list.size() != 2) {
+			if (expr_list.size() < 2) {
 				SCHEME_THROW("badly formed cond expression");
 			}
 			auto cond = expr_list[0];
 			if ((cond.isSymbol() && cond.toString() == "else") || eval(cond, env_).isTrue()) {
-				return eval(expr_list[1], env_);
+				return evalAll(std::vector<Value>(expr_list.begin() + 1, expr_list.end()), env_);
 			}
 		}
+		SCHEME_THROW("no branch matched");
 	}
 	SCHEME_THROW("frame already released");
 }
 
+/* Notes: requires args.size() >= 2
+(switch expr (value1 result1) (value2 result2) ...) ->
+	List(expr, List(value1, result1), ...)
+*/
+inline Value do_switch_form(const ValueList &args, FramePtr env_) {
+	if (auto env = env_.lock()) {
+		if (args.empty()) {
+			SCHEME_THROW("empty cond expression");
+		}
+		auto expr = eval(args[0], env_);
+		if (!expr.isNumber() && !expr.isBoolean() && !expr.isString()) {
+			SCHEME_THROW("require expr to be arithmetic type or string");
+		}
+		for (size_t i = 1; i < args.size(); ++i) {
+			auto statement = args[i];
+			if (!statement.isList() || statement.size() < 2) {
+				SCHEME_THROW("badly formed branch expression");
+			}
+			ValueList list = args[i].toList();
+			ValueList result_list(list.begin() + 1, list.end());
+			Value value = list[0];
+			if ((value.isSymbol() && value.toString() == "else") || expr == eval(value, env_)) {
+				return evalAll(result_list, env_);
+			}
+		}
+		SCHEME_THROW("no branch matched");
+	}
+	SCHEME_THROW("frame already released");
+}
+
+// TBD: do_define_syntax_form
+
 static std::unordered_map<std::string, FuncType> SPECIAL_FORMS = {
-	{"define", do_define_form}, {"quote", do_quote_form}, {"lambda", do_lambda_form},
-	{"and", do_and_form},		{"or", do_or_form},		  {"if", do_if_form},
-	{"cond", do_cond_form},
+	{"define", do_define_form}, {"quote", do_quote_form},	{"lambda", do_lambda_form},
+	{"and", do_and_form},		{"or", do_or_form},			{"if", do_if_form},
+	{"cond", do_cond_form},		{"switch", do_switch_form},
 };
 
 } // namespace Scheme

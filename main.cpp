@@ -1,3 +1,4 @@
+#include "scheme_parser.hpp"
 #include "scheme_eval_apply.hpp"
 using namespace Scheme;
 
@@ -84,9 +85,12 @@ void test_branch() {
 	auto global = std::make_shared<Frame>();
 	fmt::print("{}\n", eval(List("define", "x", -1), global));
 	fmt::print("{}\n", eval(List("if", List(">", "x", 0), "x", List("-", "x")), global));
-	fmt::print(
-		"{}\n",
-		eval(List("cond", List(List(">", "x", 0), "x"), List("else", List("-", "x"))), global));
+	fmt::print("{}\n", eval(List("cond", List(List(">", "x", 0), "x", "x"),
+								 List("else", List("-", "x"), List("-", "x"))),
+							global));
+	fmt::print("{}\n", eval(List("switch", "x", List(1, R"("dsjfshj")"),
+								 List(-1, R"("aabcx")", R"("11222xxc")")),
+							global));
 }
 
 int main() {
