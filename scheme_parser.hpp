@@ -169,17 +169,16 @@ struct RegexLexer {
 	""" -> ERROR
 	*/
 	inline static const std::regex tokenPattern{
-		// Notes: 旧版本 ("(?:\\.|[^\\"])*") 会匹配 raw_string("\")
 		// R"((""|"(?:\\.|[^\\"])+")|)" // STRING
 		R"(("(?:\\.|[^\\"])*")|)" // STRING
-		R"((\s+)|)"				  // BLANK
+		R"((\s+|;.*)|)"			  // UNUSED
 		R"((\()|)"				  // LPAREN
 		R"((\))|)"				  // RPAREN
 		// Notes: 最后的 ?! 防止以字符结尾
 		R"(([+-]?(?:\d+\.?\d*|\.\d+)(?:[Ee][+-]?\d+)?)(?![A-Za-z_])|)" // NUMBER
 		// Notes: 防止匹配失败的string跑到此处
-		R"(([^\\"()]+)|)" // SYMBOL
-		R"((.+))"		  // UNMATCHED
+		R"(([^\s\\"()]+)|)" // SYMBOL
+		R"((.+))"			// UNMATCHED
 	};
 	inline void parse_line(const std::string &source) {
 		std::sregex_iterator begin(source.begin(), source.end(), tokenPattern), end{};
@@ -187,9 +186,8 @@ struct RegexLexer {
 		for (auto it = begin; it != end; ++it) {
 			auto match = *it;
 			// Notes: 1-based index
-			if (match[2].matched) { // BLANK
-				continue;
-			} else if (match[7].matched) { // UNMATCHED
+			// match[2] ignored
+			if (match[7].matched) {
 				SCHEME_THROW(fmt::format("unmatched token '{}'", match[7].str()));
 			} else if (match[1].matched) {
 				std::string str = match.str(1), trueStr;
@@ -226,19 +224,69 @@ struct RegexLexer {
 					}
 				}
 				tokens.emplace_back(Token::STRING, trueStr);
-				continue;
-			}
-			for (uint32_t idx = 3; idx < match.size(); ++idx) {
-				if (match[idx].matched) {
-					tokens.emplace_back(Token::Type(idx - 1), match.str(idx));
-					break;
-				}
+			} else if (match[3].matched) {
+				tokens.emplace_back(Token::LPAREN, "");
+			} else if (match[4].matched) {
+				tokens.emplace_back(Token::RPAREN, "");
+			} else if (match[5].matched) {
+				tokens.emplace_back(Token::NUMBER, match[5].str());
+			} else if (match[6].matched) {
+				tokens.emplace_back(Token::SYMBOL, match[6].str());
 			}
 		}
 	}
 };
 
-struct Parser {};
+struct Parser {
+public:
+	std::vector<Value> expressions;
+
+public:
+	inline void parse_expressions(const std::vector<Token> &tokens) {
+		for (size_t pos = 0; pos < tokens.size();) {
+			auto [value, next_pos] = parse(tokens, pos);
+			pos = next_pos;
+			expressions.emplace_back(value);
+		}
+	}
+
+	inline std::pair<Value, size_t> parse(const std::vector<Token> &tokens, size_t pos = 0) {
+		auto &token = tokens[pos++];
+		switch (token.type) {
+		case Token::STRING:
+			return {token.value, pos};
+		case Token::LPAREN: {
+			ValueList list;
+			while (pos < tokens.size() && tokens[pos].type != Token::RPAREN) {
+				auto [value, new_pos] = parse(tokens, pos);
+				pos = new_pos;
+				list.emplace_back(value);
+			}
+			if (pos == tokens.size()) {
+				SCHEME_THROW("missing )");
+			}
+			Value result = nil;
+			for (auto it = list.rbegin(); it != list.rend(); ++it) {
+				result = Pair(*it, result);
+			}
+			return {result, pos + 1};
+		}
+		case Token::RPAREN:
+			SCHEME_THROW("unmatched right parenthesis")
+		case Token::NUMBER:
+			return {std::stod(token.value), pos};
+		case Token::SYMBOL:
+			if (token.value == "#t" || token.value == "#T") {
+				return {true, pos};
+			} else if (token.value == "#f" || token.value == "#F") {
+				return {false, pos};
+			}
+			return {Symbol(token.value), pos};
+		default:
+			SCHEME_THROW("unknown token type");
+		}
+	}
+};
 
 }; // namespace Scheme
 

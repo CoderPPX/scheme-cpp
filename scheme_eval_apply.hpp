@@ -11,7 +11,7 @@ inline Value eval(Value expr, FramePtr env_, bool tail) {
 	if (auto env = env_.lock()) {
 		// Notes: 什么是symbol? quoted? variable name?
 		if (expr.isSymbol()) {
-			return env->lookUp(expr);
+			return env->lookUp(expr.toSymbol().name);
 		} else if (expr.isSelfEvaluating()) {
 			return expr;
 		}
@@ -21,10 +21,10 @@ inline Value eval(Value expr, FramePtr env_, bool tail) {
 		}
 		auto p = expr.toPair();
 		auto car = p->car, cdr = p->cdr;
-		if (car.isSymbol() && SPECIAL_FORMS.contains(car.toType<std::string>())) // special forms
+		if (car.isSymbol() && SPECIAL_FORMS.contains(car.toSymbol().name)) // special forms
 		{
 			// List(List("f", "x"), List("+", "x", 1)) -> ((f x) (+ x 1))
-			return SPECIAL_FORMS[car.toType<std::string>()](cdr.toList(), env_);
+			return SPECIAL_FORMS[car.toSymbol().name](cdr.toList(), env_);
 		} else {
 			auto procedure = eval(car, env_);
 			if (!procedure.isType<ProcedurePtr>()) {

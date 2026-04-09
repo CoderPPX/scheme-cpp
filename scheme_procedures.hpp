@@ -133,13 +133,13 @@ public:
 	// Display
 	inline static Value builtin_display(const ValueList &args, FramePtr) {
 		for (const auto &arg : args) {
-			fmt::print("{}", arg.str());
+			fmt::print("{}\n", arg.str());
 		}
-		return nil;
+		return Undefined();
 	}
 	inline static Value builtin_newline(const ValueList &args, FramePtr) {
 		fmt::print("\n");
-		return nil;
+		return Undefined();
 	}
 };
 
@@ -227,11 +227,11 @@ inline Value do_define_form(const ValueList &args, FramePtr env_) {
 		}
 		Value signature = args[0];
 		if (signature.isSymbol()) {
-			env->define(signature.toType<std::string>(), eval(args[1], env_));
+			env->define(signature.toSymbol().name, eval(args[1], env_));
 			return args[0];
 		} else if (signature.isList() && signature.toPair()->car.isSymbol()) {
 			auto pair = signature.toPair();
-			env->define(pair->car.toString(), do_lambda_form({pair->cdr, args[1]}, env_));
+			env->define(pair->car.toSymbol().name, do_lambda_form({pair->cdr, args[1]}, env_));
 			return pair->car;
 		}
 		SCHEME_THROW("non-symbol");
@@ -302,7 +302,7 @@ inline Value do_cond_form(const ValueList &args, FramePtr env_) {
 				SCHEME_THROW("badly formed cond expression");
 			}
 			auto cond = expr_list[0];
-			if ((cond.isSymbol() && cond.toString() == "else") || eval(cond, env_).isTrue()) {
+			if ((cond.isSymbol() && cond.toSymbol().name == "else") || eval(cond, env_).isTrue()) {
 				return evalAll(std::vector<Value>(expr_list.begin() + 1, expr_list.end()), env_);
 			}
 		}
@@ -332,7 +332,8 @@ inline Value do_switch_form(const ValueList &args, FramePtr env_) {
 			ValueList list = args[i].toList();
 			ValueList result_list(list.begin() + 1, list.end());
 			Value value = list[0];
-			if ((value.isSymbol() && value.toString() == "else") || expr == eval(value, env_)) {
+			if ((value.isSymbol() && value.toSymbol().name == "else") ||
+				expr == eval(value, env_)) {
 				return evalAll(result_list, env_);
 			}
 		}

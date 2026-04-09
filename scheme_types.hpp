@@ -45,16 +45,41 @@ using PairPtr = std::shared_ptr<Pair>;
 using FramePtr = std::weak_ptr<Frame>;
 using ProcedurePtr = std::shared_ptr<Procedure>;
 
+struct Undefined {
+	Undefined() = default;
+	// Notes: 必须要有 const 标记否则 variant 无法比较
+	inline bool operator==(const Undefined &) const { return true; }
+};
 struct NilType : public std::monostate {};
 const static NilType nil{};
+
+// Notes: 防止和 string 混淆
+struct Symbol {
+	std::string name;
+	inline Symbol() = default;
+	template <typename T> explicit Symbol(const T &str_) : name(str_) {}
+	inline Symbol(const Symbol &other_) : name(other_.name) {}
+	inline Symbol(Symbol &&other_) : name(std::move(other_.name)) {}
+	inline bool operator==(const Symbol &other_) const { return name == other_.name; }
+	inline Symbol &operator=(const Symbol &other_) {
+		name = other_.name;
+		return *this;
+	}
+	inline Symbol &operator=(Symbol &&other_) {
+		name = std::move(other_.name);
+		return *this;
+	}
+};
 
 // Notes: 为什么使用variant
 struct Value : public std::variant<double,		 // Number
 								   bool,		 // Boolean
-								   std::string,	 // Symbol
+								   std::string,	 // String
+								   Symbol,		 // Symbol
 								   PairPtr,		 // Pair
 								   ProcedurePtr, // Functions
-								   NilType		 // Nil
+								   NilType,		 // Nil
+								   Undefined	 // Undefined
 								   > {
 	// Notes: 这一句什么意思
 	using variant::variant;
@@ -71,31 +96,36 @@ struct Value : public std::variant<double,		 // Number
 	inline Value(T v) : variant(static_cast<double>(v)) {}
 	inline Value(float v) : variant(static_cast<double>(v)) {}
 	inline Value(const Pair &v);
+	inline Value &operator=(const Pair &v) {
+		*this = std::make_shared<Pair>(v);
+		return *this;
+	};
 	template <typename T> inline bool isType() const { return std::holds_alternative<T>(*this); }
-	template <typename T> inline T toType() const { return std::get<T>(*this); }
+	template <typename T> inline T toType() const {
+		if (isType<T>()) {
+			return std::get<T>(*this);
+		}
+		// DEBUG ONLY
+		SCHEME_THROW(
+			fmt::format("invalid type conversion from {} to {}", typeName(), typeid(T).name()));
+	}
 	inline bool isNil() const { return isType<NilType>(); };
 	inline bool isFalse() const { return isType<bool>() && toType<bool>() == false; }
 	inline bool isTrue() const { return !isFalse(); }
+	// Notes: nil 不能是Pair否则 toList 的逻辑会出错
 	inline bool isPair() const { return isType<PairPtr>(); }
 	inline bool isList() const;
 	inline bool isProcedure() const { return isType<ProcedurePtr>(); }
 	inline bool isBoolean() const { return isType<bool>(); }
 	inline bool isNumber() const { return isType<double>(); }
-	inline bool isString() const {
-		if (!isType<std::string>()) {
-			return false;
-		}
-		const std::string &str = toType<std::string>();
-		return str.starts_with('"') && str.ends_with('"');
-	}
-	inline bool isSymbol() const {
-		return isType<std::string>() && !toType<std::string>().starts_with('"') &&
-			   !toType<std::string>().ends_with('"');
-	}
+	inline bool isString() const { return isType<std::string>(); }
+	inline bool isSymbol() const { return isType<Symbol>(); }
+	inline bool isUndefined() const { return isType<Undefined>(); }
 	inline bool isAtomic() const {
 		return isBoolean() || isNumber() || isSymbol() || isNil() || isString();
 	};
 	// Conversion
+	inline Symbol toSymbol() const { return toType<Symbol>(); }
 	inline std::string toString() const { return toType<std::string>(); }
 	inline PairPtr toPair() const;
 	inline std::vector<Value> toList() const;
@@ -108,25 +138,30 @@ struct Value : public std::variant<double,		 // Number
 	//
 	inline std::string typeName() const {
 		if (isNil()) {
-			return "nil";
+			return "Nil";
 		}
 		if (isList() || isPair()) {
-			return "pair";
+			return "Pair";
 		}
 		if (isSymbol()) {
-			return "symbol";
+			return "Symbol";
+		}
+		if (isString()) {
+			return "String";
 		}
 		if (isNumber()) {
-			return "number";
+			return "Number";
 		}
 		if (isBoolean()) {
-			return "boolean";
+			return "Boolean";
 		}
 		if (isProcedure()) {
-			return "procedure";
+			return "Procedure";
+		}
+		if (isUndefined()) {
+			return "Undefined";
 		}
 		SCHEME_THROW("unknown type");
-		return "undefined";
 	}
 	inline std::string str() const;
 	inline std::string repr() const;
@@ -239,15 +274,18 @@ inline bool Value::isList() const {
 	return true;
 }
 
-inline std::string Value::str() const {
+std::string Value::str() const {
 	if (isNil()) {
 		return "()";
 	}
 	if (isList() || isPair()) {
 		return toPair()->str();
 	}
-	if (isSymbol() || isString()) {
-		return toType<std::string>();
+	if (isSymbol()) {
+		return toSymbol().name;
+	}
+	if (isString()) {
+		return toString();
 	}
 	if (isNumber()) {
 		return std::to_string(toType<double>());
@@ -258,8 +296,10 @@ inline std::string Value::str() const {
 	if (isProcedure()) {
 		return toType<ProcedurePtr>()->str();
 	}
+	if (isUndefined()) {
+		return "<undefined>";
+	}
 	SCHEME_THROW("unknown type");
-	return "undefined";
 }
 
 inline std::string Value::repr() const {
@@ -269,8 +309,11 @@ inline std::string Value::repr() const {
 	if (isList() || isPair()) {
 		return toPair()->repr();
 	}
-	if (isSymbol() || isString()) {
-		return toType<std::string>();
+	if (isSymbol()) {
+		return toSymbol().name;
+	}
+	if (isString()) {
+		return fmt::format(R"("{}")", toType<std::string>());
 	}
 	if (isNumber()) {
 		return std::to_string(toType<double>());
@@ -281,8 +324,10 @@ inline std::string Value::repr() const {
 	if (isProcedure()) {
 		return toType<ProcedurePtr>()->repr();
 	}
+	if (isUndefined()) {
+		return "<undefined>";
+	}
 	SCHEME_THROW("unknown type");
-	return "undefined";
 }
 
 inline size_t Value::size() const {
@@ -307,7 +352,7 @@ struct Frame : public std::enable_shared_from_this<Frame> {
 	inline Frame();
 	inline Frame(FramePtr parent_) : parent(parent_) {}
 	inline void define(const std::string &symbol, Value v) { bindings[symbol] = v; }
-	inline Value lookUp(Value var) { return lookUp(var.toType<std::string>()); }
+	inline Value lookUp(Value var) { return lookUp(var.toSymbol().name); }
 	inline Value lookUp(const std::string &name) {
 		if (bindings.contains(name)) {
 			return bindings[name];
@@ -335,7 +380,7 @@ struct Frame : public std::enable_shared_from_this<Frame> {
 		// 	formals = pf->cdr;
 		// }
 		for (size_t i = 0; i < formals.size(); ++i) {
-			child->bindings[formals[i].toString()] = vals[i];
+			child->bindings[formals[i].toSymbol().name] = vals[i];
 		}
 		return child;
 	}
