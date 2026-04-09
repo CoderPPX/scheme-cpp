@@ -13,14 +13,14 @@ struct Token {
 public:
 	enum Type : uint32_t {
 		STRING = 0,
-		LPAREN = 1,
-		RPAREN = 2,
-		NUMBER = 3,
-		SYMBOL = 4,
-		BLANK = 5,
+		BLANK = 1,
+		LPAREN = 2,
+		RPAREN = 3,
+		NUMBER = 4,
+		SYMBOL = 5,
 	};
 	inline const static std::array<std::string, 6> TOKEN_NAMES = {
-		"STRING", "LPAREN", "RPAREN", "NUMBER", "SYMBOL", "BLANK",
+		"STRING", "BLANK", "LPAREN", "RPAREN", "NUMBER", "SYMBOL",
 	};
 
 public:
@@ -161,31 +161,40 @@ public:
 
 struct RegexLexer {
 	std::vector<Token> tokens;
+	/* Test cases:
+	"" -> STRING()
+	"\" -> ERROR
+	"\t" -> STRING(    )
+	"\\" -> STRING(\)
+	""" -> ERROR
+	*/
 	inline static const std::regex tokenPattern{
-		/*
 		// Notes: 旧版本 ("(?:\\.|[^\\"])*") 会匹配 raw_string("\")
-		R"((""|"(?:\\.|[^\\"])+")|)" // STRING
-		*/
+		// R"((""|"(?:\\.|[^\\"])+")|)" // STRING
 		R"(("(?:\\.|[^\\"])*")|)" // STRING
+		R"((\s+)|)"				  // BLANK
 		R"((\()|)"				  // LPAREN
 		R"((\))|)"				  // RPAREN
 		// Notes: 最后的 ?! 防止以字符结尾
 		R"(([+-]?(?:\d+\.?\d*|\.\d+)(?:[Ee][+-]?\d+)?)(?![A-Za-z_])|)" // NUMBER
 		// Notes: 防止匹配失败的string跑到此处
-		R"(([^\s\\"()]+))" // SYMBOL
+		R"(([^\\"()]+)|)" // SYMBOL
+		R"((.+))"		  // UNMATCHED
 	};
 	inline void parse_line(const std::string &source) {
 		std::sregex_iterator begin(source.begin(), source.end(), tokenPattern), end{};
 		// Notes: 没有匹配到
-		if (begin == end) {
-			SCHEME_THROW("failed to parse line");
-		}
 		for (auto it = begin; it != end; ++it) {
 			auto match = *it;
-			if (match[1].matched) {
+			// Notes: 1-based index
+			if (match[2].matched) { // BLANK
+				continue;
+			} else if (match[7].matched) { // UNMATCHED
+				SCHEME_THROW(fmt::format("unmatched token '{}'", match[7].str()));
+			} else if (match[1].matched) {
 				std::string str = match.str(1), trueStr;
-				for (size_t i = 0; i < str.size(); ++i) {
-					if (char ch = str[i] == '\\') {
+				for (size_t i = 1; i < str.size() - 1; ++i) {
+					if (char ch = str[i]; ch == '\\') {
 						switch (str[++i]) {
 						case '\\':
 							ch = '\\';
@@ -219,16 +228,11 @@ struct RegexLexer {
 				tokens.emplace_back(Token::STRING, trueStr);
 				continue;
 			}
-			bool matched = false;
-			for (uint32_t idx = 2; idx < match.size(); ++idx) {
+			for (uint32_t idx = 3; idx < match.size(); ++idx) {
 				if (match[idx].matched) {
-					matched = true;
 					tokens.emplace_back(Token::Type(idx - 1), match.str(idx));
 					break;
 				}
-			}
-			if (!matched) {
-				SCHEME_THROW("failed to parse line");
 			}
 		}
 	}

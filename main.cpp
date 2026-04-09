@@ -105,8 +105,12 @@ int main() {
 	fmt::print(">>> ");
 	while (std::getline(std::cin, line)) {
 		lexer.tokens.clear();
-		lexer.parse_line(line);
-		fmt::print("{}\n", fmt::join(lexer.tokens, "\n"));
+		try {
+			lexer.parse_line(line);
+			fmt::print("{}\n", fmt::join(lexer.tokens, "\n"));
+		} catch (const std::exception &err) {
+			fmt::print("{}\n", err.what());
+		}
 		fmt::print(">>> ");
 	}
 	return 0;
