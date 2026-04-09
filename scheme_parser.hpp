@@ -1,4 +1,5 @@
 #pragma once
+#include <regex>
 #include <array>
 #include <vector>
 #include <cctype>
@@ -11,17 +12,15 @@ namespace Scheme {
 struct Token {
 public:
 	enum Type : uint32_t {
-		NUMBER = 0,
-		STRING = 1,
-		SYMBOL = 2,
-		BOOLEAN = 3,
-		LPAREN = 4,
-		RPAREN = 5,
-		BLANK = 6,
-		QUOTE = 7,
+		STRING = 0,
+		LPAREN = 1,
+		RPAREN = 2,
+		NUMBER = 3,
+		SYMBOL = 4,
+		BLANK = 5,
 	};
-	inline const static std::array<std::string, 8> TOKEN_NAMES = {
-		"NUMBER", "STRING", "SYMBOL", "BOOLEAN", "LPAREN", "RPAREN", "BLANK", "QUOTE",
+	inline const static std::array<std::string, 6> TOKEN_NAMES = {
+		"STRING", "LPAREN", "RPAREN", "NUMBER", "SYMBOL", "BLANK",
 	};
 
 public:
@@ -34,7 +33,7 @@ public:
 struct Lexer {
 public:
 	std::vector<Token> tokens;
-	Token::Type current_type = Token::BLANK;
+	Token::Type currentType = Token::BLANK;
 
 public:
 	inline static bool ignoring(char c) { return c == ' ' || c == '\t' || c == '\n'; }
@@ -103,9 +102,6 @@ public:
 			} else if (ch == ')') {
 				tokens.emplace_back(Token::RPAREN, "");
 				i++;
-			} else if (ch == '\'') {
-				tokens.emplace_back(Token::QUOTE, "");
-				i++;
 			} else {
 				std::string str;
 				bool could_be_number = false;
@@ -163,6 +159,82 @@ public:
 	}
 };
 
+struct RegexLexer {
+	std::vector<Token> tokens;
+	inline static const std::regex tokenPattern{
+		/*
+		// Notes: 旧版本 ("(?:\\.|[^\\"])*") 会匹配 raw_string("\")
+		R"((""|"(?:\\.|[^\\"])+")|)" // STRING
+		*/
+		R"(("(?:\\.|[^\\"])*")|)" // STRING
+		R"((\()|)"				  // LPAREN
+		R"((\))|)"				  // RPAREN
+		// Notes: 最后的 ?! 防止以字符结尾
+		R"(([+-]?(?:\d+\.?\d*|\.\d+)(?:[Ee][+-]?\d+)?)(?![A-Za-z_])|)" // NUMBER
+		// Notes: 防止匹配失败的string跑到此处
+		R"(([^\s\\"()]+))" // SYMBOL
+	};
+	inline void parse_line(const std::string &source) {
+		std::sregex_iterator begin(source.begin(), source.end(), tokenPattern), end{};
+		// Notes: 没有匹配到
+		if (begin == end) {
+			SCHEME_THROW("failed to parse line");
+		}
+		for (auto it = begin; it != end; ++it) {
+			auto match = *it;
+			if (match[1].matched) {
+				std::string str = match.str(1), trueStr;
+				for (size_t i = 0; i < str.size(); ++i) {
+					if (char ch = str[i] == '\\') {
+						switch (str[++i]) {
+						case '\\':
+							ch = '\\';
+							break;
+						case '\"':
+							ch = '\"';
+							break;
+						case 'n':
+							ch = '\n';
+							break;
+						case 'r':
+							ch = '\r';
+							break;
+						case 't':
+							ch = '\t';
+							break;
+						case 'b':
+							ch = '\b';
+							break;
+						case '0':
+							ch = '\0';
+							break;
+						default:
+							SCHEME_THROW("unsupported escape character");
+						}
+						trueStr += ch;
+					} else {
+						trueStr += ch;
+					}
+				}
+				tokens.emplace_back(Token::STRING, trueStr);
+				continue;
+			}
+			bool matched = false;
+			for (uint32_t idx = 2; idx < match.size(); ++idx) {
+				if (match[idx].matched) {
+					matched = true;
+					tokens.emplace_back(Token::Type(idx - 1), match.str(idx));
+					break;
+				}
+			}
+			if (!matched) {
+				SCHEME_THROW("failed to parse line");
+			}
+		}
+	}
+};
+
+struct Parser {};
 
 }; // namespace Scheme
 

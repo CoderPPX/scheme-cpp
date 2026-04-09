@@ -92,13 +92,22 @@ void test_branch() {
 								 List(-1, R"("aabcx")", R"("11222xxc")")),
 							global));
 }
-
+#include <iostream>
 int main() {
-	test_pair();
-	test1();
-	test2();
-	test3();
-	test4();
-	test_branch();
+	// test_pair();
+	// test1();
+	// test2();
+	// test3();
+	// test4();
+	// test_branch();
+	std::string line;
+	Scheme::RegexLexer lexer;
+	fmt::print(">>> ");
+	while (std::getline(std::cin, line)) {
+		lexer.tokens.clear();
+		lexer.parse_line(line);
+		fmt::print("{}\n", fmt::join(lexer.tokens, "\n"));
+		fmt::print(">>> ");
+	}
 	return 0;
 }
