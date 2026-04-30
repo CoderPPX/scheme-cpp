@@ -18,14 +18,16 @@ public:
 		RPAREN = 3,
 		NUMBER = 4,
 		SYMBOL = 5,
+		QUOTE = 6,
 	};
-	inline const static std::array<std::string, 6> TOKEN_NAMES = {
-		"STRING", "BLANK", "LPAREN", "RPAREN", "NUMBER", "SYMBOL",
+	inline const static std::array<std::string, 7> TOKEN_NAMES = {
+		"STRING", "BLANK", "LPAREN", "RPAREN", "NUMBER", "SYMBOL", "QUOTE",
 	};
 
 public:
 	Type type;
 	std::string value;
+	inline Token() = default;
 	inline Token(Type type_, const std::string &value_) : type(type_), value(value_) {}
 	inline std::string str() const { return fmt::format("{}({})", TOKEN_NAMES[type], value); }
 };
@@ -287,6 +289,191 @@ public:
 		}
 	}
 };
+
+namespace SyntaxRule {
+
+inline const std::string NUMERAL_STARTS = "0123456789+-.";
+inline const std::string SYMBOL_CHARS = "abcdefghijklmnopqrstuvwxyz"
+										"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+										"#!$%&*/:<=>?@^_~[],@`" +
+										NUMERAL_STARTS;
+inline const std::string STRING_DELIMS = "\"";
+inline const std::string WHITESPACE = "\t\n\r ";
+inline const std::string SINGLE_CHAR_TOKENS = "()'";
+inline const std::string TOKEN_END = WHITESPACE + SINGLE_CHAR_TOKENS + STRING_DELIMS;
+inline const std::string DELIMITERS = SINGLE_CHAR_TOKENS + ".";
+
+} // namespace SyntaxRule
+
+inline bool isValidSymbol(const std::string &str) {
+	if (str.empty())
+		return false;
+	for (auto c : str) {
+		if (!SyntaxRule::SYMBOL_CHARS.contains(c)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// return value: (token string, end index)
+inline std::pair<Token, size_t> nextToken(const std::string &str, size_t begin_idx) {
+	for (size_t i = begin_idx; i < str.size();) {
+		char c = str[i];
+		if (c == ';') {
+			return {Token(), std::string::npos};
+		} else if (SyntaxRule::WHITESPACE.contains(c)) {
+			++i;
+		} else if (SyntaxRule::SINGLE_CHAR_TOKENS.contains(c)) {
+			Token token;
+			if (c == '(')
+				token.type = Token::LPAREN;
+			else if (c == ')')
+				token.type = Token::RPAREN;
+			else if (c == '\'')
+				token.type = Token::QUOTE;
+			return {token, i + 1};
+		} else if (SyntaxRule::STRING_DELIMS.contains(c)) {
+			i++;
+			std::string s;
+			while (i < str.size()) {
+				if (str[i] == '\"') {
+					return {Token(Token::STRING, s), i + 1};
+				} else if (str[i] == '\\') {
+					if (++i == str.size())
+						SCHEME_THROW("string ended abruptly");
+					switch (str[i++]) {
+					case 'n':
+						s += '\n';
+						break;
+					case 'r':
+						s += '\r';
+						break;
+					case 't':
+						s += '\t';
+						break;
+					case '0':
+						s += '\0';
+						break;
+					case 'b':
+						s += '\b';
+						break;
+					case '"':
+						s += '"';
+						break;
+					default:
+						SCHEME_THROW("unsupported escape character");
+					}
+				} else {
+					s += str[i++];
+				}
+			}
+			SCHEME_THROW("string ended abruptly");
+		} else {
+			size_t j = i;
+			std::string s;
+			for (; j < str.size() && !SyntaxRule::TOKEN_END.contains(str[j]); ++j) {
+				s += str[j];
+			}
+			try {
+				size_t pos;
+				double v = std::stod(s, &pos);
+				if (pos == s.size())
+					return {Token(Token::NUMBER, s), j};
+				else
+					return {Token(Token::SYMBOL, s), j};
+			} catch (...) {
+				return {Token(Token::SYMBOL, s), j};
+			}
+		}
+	}
+	return {Token(), std::string::npos};
+}
+
+inline std::vector<Token> tokenizeLine(const std::string &line) {
+	std::vector<Token> tokens;
+	auto [token, idx] = nextToken(line, 0);
+	while (idx != std::string::npos) {
+		tokens.emplace_back(token);
+		std::tie(token, idx) = nextToken(line, idx);
+	}
+	return tokens;
+}
+
+// return value: (expression, end index)
+inline std::pair<Value, size_t> readExpr(const std::vector<Token> &tokens, size_t idx) {
+	PairPtr expr = nullptr;
+	// std::shared_ptr<Value> end = nullptr;
+	Value *end = nullptr;
+	for (Value value; idx < tokens.size();) {
+		const Token &token = tokens[idx];
+		switch (token.type) {
+		case Token::NUMBER:
+			++idx;
+			value = std::stod(token.value);
+			break;
+		case Token::STRING:
+			++idx;
+			value = token.value;
+			break;
+		case Token::SYMBOL:
+			++idx;
+			value = Symbol(token.value);
+			break;
+		case Token::QUOTE:
+			break;
+		case Token::LPAREN:
+			std::tie(value, idx) = readExpr(tokens, idx + 1);
+			break;
+		case Token::RPAREN:
+			return {expr ? Value(expr) : nil, idx + 1};
+		default:
+			SCHEME_THROW("unsupported token type");
+		}
+		if (expr == nullptr) {
+			expr = std::make_shared<Pair>(value, nil);
+			// Notes: 这样是错的, 因为 make_shared 会创建一个副本
+			// end = std::make_shared<Value>(expr->cdr);
+			end = &expr->cdr;
+		} else {
+			auto cdr = std::make_shared<Pair>(value, nil);
+			*end = cdr;
+			// end = std::make_shared<Value>(cdr->cdr);
+			end = &cdr->cdr;
+		}
+	}
+	SCHEME_THROW("invalid expression");
+}
+
+inline std::vector<Value> parseLine(const std::string &line) {
+	std::vector<Value> expressions;
+	auto tokens = tokenizeLine(line);
+	for (size_t idx = 0; idx < tokens.size();) {
+		Value value;
+		Token token = tokens[idx++];
+		switch (token.type) {
+		case Token::LPAREN:
+			std::tie(value, idx) = readExpr(tokens, idx);
+			expressions.emplace_back(value);
+			continue;
+		case Token::RPAREN:
+			SCHEME_THROW("unmatched right parenthesis");
+		case Token::NUMBER:
+			value = std::stod(token.value);
+			break;
+		case Token::STRING:
+			value = token.value;
+			break;
+		case Token::SYMBOL:
+			value = Symbol(token.value);
+			break;
+		default:
+			SCHEME_THROW("unsupported token type");
+		}
+		expressions.emplace_back(value);
+	}
+	return expressions;
+}
 
 }; // namespace Scheme
 
