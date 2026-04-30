@@ -22,7 +22,7 @@ public:
 
 public:
 	template <typename Operator = double(double a, double b)>
-	inline static Value number_reduce(const ValueList &args, Operator op) {
+	inline static Value numberReduce(const ValueList &args, Operator op) {
 		if (args.size() == 0) {
 			SCHEME_THROW("not enough parameters");
 		}
@@ -38,20 +38,20 @@ public:
 		}
 		return result;
 	}
-	inline static Value builtin_add(const ValueList &args, FramePtr) {
-		return number_reduce(args, [](double a, double b) { return a + b; });
+	inline static Value builtinAdd(const ValueList &args, FramePtr) {
+		return numberReduce(args, [](double a, double b) { return a + b; });
 	}
-	inline static Value builtin_sub(const ValueList &args, FramePtr) {
+	inline static Value builtinSub(const ValueList &args, FramePtr) {
 		if (args.size() == 1) {
 			return -args[0].toType<double>();
 		}
-		return number_reduce(args, [](double a, double b) { return a - b; });
+		return numberReduce(args, [](double a, double b) { return a - b; });
 	}
-	inline static Value builtin_mul(const ValueList &args, FramePtr) {
-		return number_reduce(args, [](double a, double b) { return a * b; });
+	inline static Value builtinMul(const ValueList &args, FramePtr) {
+		return numberReduce(args, [](double a, double b) { return a * b; });
 	}
-	inline static Value builtin_div(const ValueList &args, FramePtr) {
-		return number_reduce(args, [](double a, double b) {
+	inline static Value builtinDiv(const ValueList &args, FramePtr) {
+		return numberReduce(args, [](double a, double b) {
 			if (b == 0.0) {
 				SCHEME_THROW("division by zero");
 			}
@@ -60,7 +60,7 @@ public:
 	}
 	// 比较运算模板：检查是否满足单调性，例如 (< 1 2 3) 为真
 	template <typename Compare>
-	inline static Value number_compare(const ValueList &args, Compare comp) {
+	inline static Value numberCompare(const ValueList &args, Compare comp) {
 		if (args.size() < 2)
 			return true; // 单个数字比较默认为真
 		for (size_t i = 0; i < args.size() - 1; ++i) {
@@ -73,44 +73,44 @@ public:
 		}
 		return true;
 	}
-	inline static Value builtin_lt(const ValueList &args, FramePtr) {
-		return number_compare(args, std::less<double>());
+	inline static Value builtinLt(const ValueList &args, FramePtr) {
+		return numberCompare(args, std::less<double>());
 	}
-	inline static Value builtin_le(const ValueList &args, FramePtr) {
-		return number_compare(args, std::less_equal<double>());
+	inline static Value builtinLe(const ValueList &args, FramePtr) {
+		return numberCompare(args, std::less_equal<double>());
 	}
-	inline static Value builtin_gt(const ValueList &args, FramePtr) {
-		return number_compare(args, std::greater<double>());
+	inline static Value builtinGt(const ValueList &args, FramePtr) {
+		return numberCompare(args, std::greater<double>());
 	}
-	inline static Value builtin_ge(const ValueList &args, FramePtr) {
-		return number_compare(args, std::greater_equal<double>());
+	inline static Value builtinGe(const ValueList &args, FramePtr) {
+		return numberCompare(args, std::greater_equal<double>());
 	}
-	inline static Value builtin_eq(const ValueList &args, FramePtr) {
-		return number_compare(args, std::equal_to<double>());
+	inline static Value builtinEq(const ValueList &args, FramePtr) {
+		return numberCompare(args, std::equal_to<double>());
 	}
-	inline static Value builtin_not(const ValueList &args, FramePtr) {
+	inline static Value builtinNot(const ValueList &args, FramePtr) {
 		if (args.size() != 1) {
 			SCHEME_THROW("not expects 1 argument");
 		}
 		return args[0].isFalse(); // Scheme 中只有 #f 是假，其余皆为真
 	}
 	// Pair and List
-	inline static Value builtin_cons(const ValueList &args, FramePtr) {
+	inline static Value builtinCons(const ValueList &args, FramePtr) {
 		if (args.size() != 2)
 			SCHEME_THROW("cons expects 2 arguments");
 		return std::make_shared<Pair>(args[0], args[1]);
 	}
-	inline static Value builtin_car(const ValueList &args, FramePtr) {
+	inline static Value builtinCar(const ValueList &args, FramePtr) {
 		if (args.size() != 1 || !args[0].isPair())
 			SCHEME_THROW("car expects a pair");
 		return args[0].toPair()->car;
 	}
-	inline static Value builtin_cdr(const ValueList &args, FramePtr) {
+	inline static Value builtinCdr(const ValueList &args, FramePtr) {
 		if (args.size() != 1 || !args[0].isPair())
 			SCHEME_THROW("cdr expects a pair");
 		return args[0].toPair()->cdr;
 	}
-	inline static Value builtin_list(const ValueList &args, FramePtr) {
+	inline static Value builtinList(const ValueList &args, FramePtr) {
 		Value result = nil;
 		// 从后往前构造 Pair 链表
 		for (auto it = args.rbegin(); it != args.rend(); ++it) {
@@ -119,25 +119,25 @@ public:
 		return result;
 	}
 	// Type checks
-	inline static Value builtin_is_null(const ValueList &args, FramePtr) {
+	inline static Value builtinIsNull(const ValueList &args, FramePtr) {
 		if (args.size() != 1)
 			SCHEME_THROW("null? expects 1 argument");
 		return args[0].isNil();
 	}
-	inline static Value builtin_is_pair(const ValueList &args, FramePtr) {
+	inline static Value builtinIsPair(const ValueList &args, FramePtr) {
 		return args.size() == 1 && args[0].isPair();
 	}
-	inline static Value builtin_is_number(const ValueList &args, FramePtr) {
+	inline static Value builtinIsNumber(const ValueList &args, FramePtr) {
 		return args.size() == 1 && args[0].isNumber();
 	}
 	// Display
-	inline static Value builtin_display(const ValueList &args, FramePtr) {
+	inline static Value builtinDisplay(const ValueList &args, FramePtr) {
 		for (const auto &arg : args) {
 			fmt::print("{}\n", arg.str());
 		}
 		return Undefined();
 	}
-	inline static Value builtin_newline(const ValueList &args, FramePtr) {
+	inline static Value builtinNewline(const ValueList &args, FramePtr) {
 		fmt::print("\n");
 		return Undefined();
 	}
@@ -145,28 +145,28 @@ public:
 
 inline const static std::vector<BuiltinProcedure> BUILTINS = {
 	// 算术
-	{"+", BuiltinProcedure::builtin_add},
-	{"-", BuiltinProcedure::builtin_sub},
-	{"*", BuiltinProcedure::builtin_mul},
-	{"/", BuiltinProcedure::builtin_div},
+	{"+", BuiltinProcedure::builtinAdd},
+	{"-", BuiltinProcedure::builtinSub},
+	{"*", BuiltinProcedure::builtinMul},
+	{"/", BuiltinProcedure::builtinDiv},
 	// 比较
-	{"<", BuiltinProcedure::builtin_lt},
-	{"<=", BuiltinProcedure::builtin_le},
-	{">", BuiltinProcedure::builtin_gt},
-	{">=", BuiltinProcedure::builtin_ge},
-	{"=", BuiltinProcedure::builtin_eq},
+	{"<", BuiltinProcedure::builtinLt},
+	{"<=", BuiltinProcedure::builtinLe},
+	{">", BuiltinProcedure::builtinGt},
+	{">=", BuiltinProcedure::builtinGe},
+	{"=", BuiltinProcedure::builtinEq},
 	// 逻辑
-	{"not", BuiltinProcedure::builtin_not},
+	{"not", BuiltinProcedure::builtinNot},
 	// 列表
-	{"cons", BuiltinProcedure::builtin_cons},
-	{"car", BuiltinProcedure::builtin_car},
-	{"cdr", BuiltinProcedure::builtin_cdr},
-	{"list", BuiltinProcedure::builtin_list},
-	{"null?", BuiltinProcedure::builtin_is_null},
-	{"pair?", BuiltinProcedure::builtin_is_pair},
+	{"cons", BuiltinProcedure::builtinCons},
+	{"car", BuiltinProcedure::builtinCar},
+	{"cdr", BuiltinProcedure::builtinCdr},
+	{"list", BuiltinProcedure::builtinList},
+	{"null?", BuiltinProcedure::builtinIsNull},
+	{"pair?", BuiltinProcedure::builtinIsPair},
 	// 杂项
-	{"display", BuiltinProcedure::builtin_display},
-	{"newline", BuiltinProcedure::builtin_newline},
+	{"display", BuiltinProcedure::builtinDisplay},
+	{"newline", BuiltinProcedure::builtinNewline},
 };
 
 inline Frame::Frame() {
@@ -193,7 +193,7 @@ struct LambdaProcedure : public Procedure {
 	inline ~LambdaProcedure() override {}
 };
 
-inline Value do_quote_form(const ValueList &args, FramePtr env_) {
+inline Value doQuoteForm(const ValueList &args, FramePtr env_) {
 	if (auto env = env_.lock()) {
 		if (args.size() != 1) {
 			SCHEME_THROW("badly formed expression");
@@ -204,7 +204,7 @@ inline Value do_quote_form(const ValueList &args, FramePtr env_) {
 }
 
 // args[0] = formals的Pair形式, args[1:] = body的List形式
-inline Value do_lambda_form(const ValueList &args, FramePtr env_) {
+inline Value doLambdaForm(const ValueList &args, FramePtr env_) {
 	if (auto env = env_.lock()) {
 		if (args.size() < 2 || !args[0].isList() || !args[1].isList()) {
 			SCHEME_THROW("badly formed expression");
@@ -220,7 +220,7 @@ inline Value do_lambda_form(const ValueList &args, FramePtr env_) {
 	SCHEME_THROW("frame already released");
 }
 
-inline Value do_define_form(const ValueList &args, FramePtr env_) {
+inline Value doDefineForm(const ValueList &args, FramePtr env_) {
 	if (auto env = env_.lock()) {
 		if (args.size() != 2) {
 			SCHEME_THROW("badly formed expression");
@@ -231,7 +231,7 @@ inline Value do_define_form(const ValueList &args, FramePtr env_) {
 			return args[0];
 		} else if (signature.isList() && signature.toPair()->car.isSymbol()) {
 			auto pair = signature.toPair();
-			env->define(pair->car.toSymbol().name, do_lambda_form({pair->cdr, args[1]}, env_));
+			env->define(pair->car.toSymbol().name, doLambdaForm({pair->cdr, args[1]}, env_));
 			return pair->car;
 		}
 		SCHEME_THROW("non-symbol");
@@ -239,7 +239,7 @@ inline Value do_define_form(const ValueList &args, FramePtr env_) {
 	SCHEME_THROW("frame already released");
 }
 
-inline Value do_and_form(const ValueList &args, FramePtr env_) {
+inline Value doAndForm(const ValueList &args, FramePtr env_) {
 	if (auto env = env_.lock()) {
 		Value result = true;
 		for (auto &arg : args) {
@@ -253,7 +253,7 @@ inline Value do_and_form(const ValueList &args, FramePtr env_) {
 	SCHEME_THROW("frame already released");
 }
 
-inline Value do_or_form(const ValueList &args, FramePtr env_) {
+inline Value doOrForm(const ValueList &args, FramePtr env_) {
 	if (auto env = env_.lock()) {
 		Value result = false;
 		for (auto &arg : args) {
@@ -270,7 +270,7 @@ inline Value do_or_form(const ValueList &args, FramePtr env_) {
 /* Notes: requires args.size() == 3
 (if (> x 0) x (- x)) -> List(List(>, x, 0), x, List(-, x))
 */
-inline Value do_if_form(const ValueList &args, FramePtr env_) {
+inline Value doIfForm(const ValueList &args, FramePtr env_) {
 	if (auto env = env_.lock()) {
 		if (args.size() != 3) {
 			SCHEME_THROW("badly formed if expression");
@@ -288,7 +288,7 @@ inline Value do_if_form(const ValueList &args, FramePtr env_) {
 (cond ((> x 0) x) ((<= x 0) (- x))) ->
 	List(List(List(>, x, 0), x), List(List(<=, x, 0), List(-, x)))
 */
-inline Value do_cond_form(const ValueList &args, FramePtr env_) {
+inline Value doCondForm(const ValueList &args, FramePtr env_) {
 	if (auto env = env_.lock()) {
 		if (args.empty()) {
 			SCHEME_THROW("empty cond expression");
@@ -315,7 +315,7 @@ inline Value do_cond_form(const ValueList &args, FramePtr env_) {
 (switch expr (value1 result1) (value2 result2) ...) ->
 	List(expr, List(value1, result1), ...)
 */
-inline Value do_switch_form(const ValueList &args, FramePtr env_) {
+inline Value doSwitchForm(const ValueList &args, FramePtr env_) {
 	if (auto env = env_.lock()) {
 		if (args.empty()) {
 			SCHEME_THROW("empty cond expression");
@@ -345,9 +345,9 @@ inline Value do_switch_form(const ValueList &args, FramePtr env_) {
 // TBD: do_define_syntax_form
 
 static std::unordered_map<std::string, FuncType> SPECIAL_FORMS = {
-	{"define", do_define_form}, {"quote", do_quote_form},	{"lambda", do_lambda_form},
-	{"and", do_and_form},		{"or", do_or_form},			{"if", do_if_form},
-	{"cond", do_cond_form},		{"switch", do_switch_form},
+	{"define", doDefineForm}, {"quote", doQuoteForm},	{"lambda", doLambdaForm},
+	{"and", doAndForm},		  {"or", doOrForm},			{"if", doIfForm},
+	{"cond", doCondForm},	  {"switch", doSwitchForm},
 };
 
 } // namespace Scheme

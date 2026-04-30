@@ -19,9 +19,11 @@ public:
 		NUMBER = 4,
 		SYMBOL = 5,
 		QUOTE = 6,
+		BOOLEAN = 7,
+		DOT = 8,
 	};
-	inline const static std::array<std::string, 7> TOKEN_NAMES = {
-		"STRING", "BLANK", "LPAREN", "RPAREN", "NUMBER", "SYMBOL", "QUOTE",
+	inline const static std::array<std::string, 9> TOKEN_NAMES = {
+		"STRING", "BLANK", "LPAREN", "RPAREN", "NUMBER", "SYMBOL", "QUOTE", "BOOLEAN", "DOT",
 	};
 
 public:
@@ -380,11 +382,16 @@ inline std::pair<Token, size_t> nextToken(const std::string &str, size_t begin_i
 				double v = std::stod(s, &pos);
 				if (pos == s.size())
 					return {Token(Token::NUMBER, s), j};
-				else
-					return {Token(Token::SYMBOL, s), j};
 			} catch (...) {
-				return {Token(Token::SYMBOL, s), j};
 			}
+			if (s == "#t" || s == "true")
+				return {Token(Token::BOOLEAN, "#t"), j};
+			else if (s == "#f" || s == "false")
+				return {Token(Token::BOOLEAN, "#f"), j};
+			else if (s == ".")
+				return {Token(Token::DOT, "."), j};
+			else
+				return {Token(Token::SYMBOL, s), j};
 		}
 	}
 	return {Token(), std::string::npos};
@@ -401,35 +408,30 @@ inline std::vector<Token> tokenizeLine(const std::string &line) {
 }
 
 // return value: (expression, end index)
-inline std::pair<Value, size_t> readExpr(const std::vector<Token> &tokens, size_t idx) {
+inline std::pair<Value, size_t> readExpr(const std::vector<Token> &tokens, size_t idx);
+inline std::pair<Value, size_t> readTail(const std::vector<Token> &tokens, size_t idx) {
 	PairPtr expr = nullptr;
 	// std::shared_ptr<Value> end = nullptr;
 	Value *end = nullptr;
+	if (idx < tokens.size() && tokens[idx].type == Token::DOT) {
+		SCHEME_THROW("ill-formed dotted list");
+	}
 	for (Value value; idx < tokens.size();) {
 		const Token &token = tokens[idx];
-		switch (token.type) {
-		case Token::NUMBER:
-			++idx;
-			value = std::stod(token.value);
-			break;
-		case Token::STRING:
-			++idx;
-			value = token.value;
-			break;
-		case Token::SYMBOL:
-			++idx;
-			value = Symbol(token.value);
-			break;
-		case Token::QUOTE:
-			break;
-		case Token::LPAREN:
-			std::tie(value, idx) = readExpr(tokens, idx + 1);
-			break;
-		case Token::RPAREN:
+		if (token.type == Token::RPAREN) {
 			return {expr ? Value(expr) : nil, idx + 1};
-		default:
-			SCHEME_THROW("unsupported token type");
+		} else if (token.type == Token::DOT) {
+			/* test cases
+			'(1 . (2 . 3)) ;Value: (1 2 . 3)
+			*/
+			try {
+				std::tie(*end, idx) = readExpr(tokens, idx + 1);
+			} catch (const std::runtime_error &) {
+				SCHEME_THROW("ill-formed dotted list");
+			}
+			return {expr, idx + 1};
 		}
+		std::tie(value, idx) = readExpr(tokens, idx);
 		if (expr == nullptr) {
 			expr = std::make_shared<Pair>(value, nil);
 			// Notes: 这样是错的, 因为 make_shared 会创建一个副本
@@ -445,31 +447,55 @@ inline std::pair<Value, size_t> readExpr(const std::vector<Token> &tokens, size_
 	SCHEME_THROW("invalid expression");
 }
 
+inline std::pair<Value, size_t> readExpr(const std::vector<Token> &tokens, size_t idx) {
+	if (idx >= tokens.size())
+		SCHEME_THROW("index out of range");
+	Value value;
+	const Token &token = tokens[idx++];
+	switch (token.type) {
+	case Token::NUMBER:
+		value = std::stod(token.value);
+		break;
+	case Token::STRING:
+		value = token.value;
+		break;
+	case Token::SYMBOL:
+		value = Symbol(token.value);
+		break;
+	case Token::BOOLEAN:
+		value = bool(token.value == "#t");
+		break;
+	case Token::QUOTE:
+		/* test cases:
+		scm> (quote a)
+		a
+		scm> (quote (a b))
+		(a b)
+		scm> (quote a b)
+		*/
+		std::tie(value, idx) = readExpr(tokens, idx);
+		// value = List("quote", value);
+		value = List(Symbol("quote"), value);
+		break;
+	case Token::LPAREN:
+		std::tie(value, idx) = readTail(tokens, idx);
+		break;
+	case Token::DOT:
+		SCHEME_THROW("dot allowed only in list");
+	case Token::RPAREN:
+		SCHEME_THROW("unmatched right parenthesis");
+	default:
+		SCHEME_THROW("unsupported token type");
+	}
+	return {value, idx};
+}
+
 inline std::vector<Value> parseLine(const std::string &line) {
 	std::vector<Value> expressions;
 	auto tokens = tokenizeLine(line);
 	for (size_t idx = 0; idx < tokens.size();) {
 		Value value;
-		Token token = tokens[idx++];
-		switch (token.type) {
-		case Token::LPAREN:
-			std::tie(value, idx) = readExpr(tokens, idx);
-			expressions.emplace_back(value);
-			continue;
-		case Token::RPAREN:
-			SCHEME_THROW("unmatched right parenthesis");
-		case Token::NUMBER:
-			value = std::stod(token.value);
-			break;
-		case Token::STRING:
-			value = token.value;
-			break;
-		case Token::SYMBOL:
-			value = Symbol(token.value);
-			break;
-		default:
-			SCHEME_THROW("unsupported token type");
-		}
+		std::tie(value, idx) = readExpr(tokens, idx);
 		expressions.emplace_back(value);
 	}
 	return expressions;
