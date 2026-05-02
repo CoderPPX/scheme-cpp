@@ -53,7 +53,7 @@ inline Value apply(ProcedurePtr procedure, const ValueList &args_, FramePtr env_
 			return builtin->cppFunc(args_, env);
 		} else if (auto lambda = std::dynamic_pointer_cast<LambdaProcedure>(procedure)) {
 			/*
-			fmt::print("{}\n", eval(List(List("lambda", List("x", "y"),
+			fmt::println("{}", eval(List(List("lambda", List("x", "y"),
 				List("+", "x", "y")), 1, 2), global)); 输出2
 			*/
 			return evalAll(lambda->body, env->makeChildFrame(lambda->formals, args_));

@@ -1,4 +1,5 @@
 #pragma once
+#define FMT_HEADER_ONLY
 #include <string>
 #include <memory>
 #include <vector>
@@ -6,8 +7,8 @@
 #include <stdexcept>
 #include <type_traits>
 #include <unordered_map>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include "thirdparty/fmt/include/fmt/format.h"
+#include "thirdparty/fmt/include/fmt/ranges.h"
 
 #ifndef SCHEME_ENABLE_STACKTRACE
 #define SCHEME_ENABLE_STACKTRACE
@@ -32,6 +33,11 @@
 #endif
 
 namespace Scheme {
+
+struct SchemeExit : public std::exception {
+	int code;
+	SchemeExit(int c = 0) : code(c) {}
+};
 
 struct Pair;
 struct Frame;

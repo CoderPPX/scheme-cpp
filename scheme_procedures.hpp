@@ -133,13 +133,19 @@ public:
 	// Display
 	inline static Value builtinDisplay(const ValueList &args, FramePtr) {
 		for (const auto &arg : args) {
-			fmt::print("{}\n", arg.str());
+			fmt::print("{}", arg.str());
 		}
 		return Undefined();
 	}
 	inline static Value builtinNewline(const ValueList &args, FramePtr) {
-		fmt::print("\n");
+		fmt::println("");
 		return Undefined();
+	}
+	inline static Value builtinExit(const ValueList &args, FramePtr) {
+		int code = 0;
+		if (!args.empty())
+			code = args[0].toType<double>();
+		throw SchemeExit(code);
 	}
 };
 
@@ -167,6 +173,8 @@ inline const static std::vector<BuiltinProcedure> BUILTINS = {
 	// 杂项
 	{"display", BuiltinProcedure::builtinDisplay},
 	{"newline", BuiltinProcedure::builtinNewline},
+	{"exit", BuiltinProcedure::builtinExit},
+	{"quit", BuiltinProcedure::builtinExit},
 };
 
 inline Frame::Frame() {

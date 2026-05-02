@@ -4,7 +4,6 @@
 #include <vector>
 #include <cctype>
 #include <cstdint>
-#include <fmt/format.h>
 #include "scheme_types.hpp"
 
 namespace Scheme {
@@ -302,7 +301,7 @@ inline const std::string SYMBOL_CHARS = "abcdefghijklmnopqrstuvwxyz"
 inline const std::string STRING_DELIMS = "\"";
 inline const std::string WHITESPACE = "\t\n\r ";
 inline const std::string SINGLE_CHAR_TOKENS = "()'";
-inline const std::string TOKEN_END = WHITESPACE + SINGLE_CHAR_TOKENS + STRING_DELIMS;
+inline const std::string TOKEN_END = WHITESPACE + SINGLE_CHAR_TOKENS + STRING_DELIMS + ';';
 inline const std::string DELIMITERS = SINGLE_CHAR_TOKENS + ".";
 
 } // namespace SyntaxRule
@@ -323,7 +322,11 @@ inline std::pair<Token, size_t> nextToken(const std::string &str, size_t begin_i
 	for (size_t i = begin_idx; i < str.size();) {
 		char c = str[i];
 		if (c == ';') {
-			return {Token(), std::string::npos};
+			i = str.find_first_of('\n', i);
+			if (i == std::string::npos)
+				return {Token(), std::string::npos};
+			else
+				return {Token(), i + 1};
 		} else if (SyntaxRule::WHITESPACE.contains(c)) {
 			++i;
 		} else if (SyntaxRule::SINGLE_CHAR_TOKENS.contains(c)) {
@@ -407,6 +410,117 @@ inline std::vector<Token> tokenizeLine(const std::string &line) {
 	return tokens;
 }
 
+// Stateful function
+inline std::tuple<Token, size_t, bool> nextTokenMultiLine(const std::string &line,
+														  size_t begin_idx) {
+	static std::string multiLineString;
+	static int unmatchedParen = 0, stringUnclosed = 0;
+	if (stringUnclosed) {
+		while (begin_idx < line.size()) {
+			if (line[begin_idx] == '"') {
+				stringUnclosed = 0;
+				return {Token(Token::STRING, std::move(multiLineString)), begin_idx + 1, false};
+			} else if (line[begin_idx] == '\\') {
+				if (++begin_idx == line.size()) {
+					SCHEME_THROW("missing escape character");
+				}
+				switch (line[begin_idx++]) {
+				case 'n':
+					multiLineString += '\n';
+					break;
+				case 'r':
+					multiLineString += '\r';
+					break;
+				case 't':
+					multiLineString += '\t';
+					break;
+				case '0':
+					multiLineString += '\0';
+					break;
+				case 'b':
+					multiLineString += '\b';
+					break;
+				case '"':
+					multiLineString += '"';
+					break;
+				default:
+					SCHEME_THROW("unsupported escape character");
+				}
+			} else {
+				multiLineString += line[begin_idx++];
+			}
+		}
+		return {Token(Token::STRING, ""), begin_idx + 1, true};
+	}
+	for (size_t i = begin_idx; i < line.size();) {
+		char c = line[i];
+		if (c == ';') {
+			i = line.find_first_of('\n', i);
+			return {Token(Token::BLANK, ""), i == std::string::npos ? line.size() : (i + 1), false};
+		} else if (SyntaxRule::WHITESPACE.contains(c)) {
+			++i;
+		} else if (SyntaxRule::SINGLE_CHAR_TOKENS.contains(c)) {
+			Token token;
+			if (c == '(') {
+				++unmatchedParen;
+				token.type = Token::LPAREN;
+			} else if (c == ')') {
+				--unmatchedParen;
+				token.type = Token::RPAREN;
+			} else if (c == '\'') {
+				token.type = Token::QUOTE;
+			}
+			if (unmatchedParen == 0) {
+				return {token, i + 1, false};
+			} else if (unmatchedParen > 0) {
+				return {token, i + 1, true};
+			} else {
+				unmatchedParen = 0;
+				SCHEME_THROW("unmatched right parenthesis");
+			}
+		} else if (SyntaxRule::STRING_DELIMS.contains(c)) {
+			stringUnclosed = 1;
+			/* Notes: 此处直接返回 */
+			return nextTokenMultiLine(line, begin_idx + 1);
+		} else {
+			size_t j = i;
+			std::string s;
+			for (; j < line.size() && !SyntaxRule::TOKEN_END.contains(line[j]); ++j) {
+				s += line[j];
+			}
+			try {
+				size_t pos;
+				double v = std::stod(s, &pos);
+				if (pos == s.size())
+					return {Token(Token::NUMBER, s), j, unmatchedParen};
+			} catch (...) {
+			}
+			if (s == "#t" || s == "true")
+				return {Token(Token::BOOLEAN, "#t"), j, unmatchedParen};
+			else if (s == "#f" || s == "false")
+				return {Token(Token::BOOLEAN, "#f"), j, unmatchedParen};
+			else if (s == ".")
+				return {Token(Token::DOT, "."), j, unmatchedParen};
+			else
+				return {Token(Token::SYMBOL, s), j, unmatchedParen};
+		}
+	}
+	return {Token(), std::string::npos, true};
+}
+
+// return value: whether more line is needed
+inline bool tokenizeMultiLine(std::vector<Token> &tokens, const std::string &line) {
+	Token token;
+	bool moreOnLine = false;
+	for (size_t idx = 0; idx < line.size();) {
+		std::tie(token, idx, moreOnLine) = nextTokenMultiLine(line, idx);
+		if ((token.type != Token::STRING || !moreOnLine) && token.type != Token::BLANK) {
+			tokens.push_back(token);
+		}
+	}
+	return moreOnLine;
+}
+
 // return value: (expression, end index)
 inline std::pair<Value, size_t> readExpr(const std::vector<Token> &tokens, size_t idx);
 inline std::pair<Value, size_t> readTail(const std::vector<Token> &tokens, size_t idx) {
@@ -488,6 +602,14 @@ inline std::pair<Value, size_t> readExpr(const std::vector<Token> &tokens, size_
 		SCHEME_THROW("unsupported token type");
 	}
 	return {value, idx};
+}
+
+inline void parseTokens(const std::vector<Token> &tokens, std::vector<Value> &expressions) {
+	for (size_t idx = 0; idx < tokens.size();) {
+		Value value;
+		std::tie(value, idx) = readExpr(tokens, idx);
+		expressions.emplace_back(value);
+	}
 }
 
 inline std::vector<Value> parseLine(const std::string &line) {

@@ -1,0 +1,6 @@
+[submodule "thirdparty/cpp-linenoise"]
+	path = thirdparty/cpp-linenoise
+	url = https://github.com/yhirose/cpp-linenoise.git
+[submodule "thirdparty/fmt"]
+	path = thirdparty/fmt
+	url = https://github.com/fmtlib/fmt.git
